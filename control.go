@@ -11,7 +11,13 @@ type Hello struct {
 type Welcome struct {
 	ServerID      string `json:"server_id"`
 	ServerVersion string `json:"server_version"`
+	Error         Error  `json:"error"`
 	Timestamp     int64  `json:"timestamp"`
+}
+
+type Error struct {
+	Title     string
+	Timestamp int64
 }
 
 func MarshalHello(h Hello) ([]byte, error) {

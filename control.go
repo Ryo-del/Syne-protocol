@@ -1,6 +1,11 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+
+	lpprotocol "github.com/libp2p/go-libp2p/core/protocol"
+)
 
 type Hello struct {
 	PeerID          string `json:"peer_id"`
@@ -23,6 +28,11 @@ type controlEnvelope struct {
 	Type string `json:"type"`
 }
 
+const (
+	StreamProtocol            = lpprotocol.ID("/syne/control/1.0.0")
+	DefaultReadDeadline       = 5 * time.Second
+	DefaultReadLimit    int64 = 256 * 1024
+)
 const (
 	ControlTypeWelcome = "welcome"
 	ControlTypeReject  = "reject"

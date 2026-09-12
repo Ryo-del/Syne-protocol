@@ -42,38 +42,20 @@ func MarshalHello(h Hello) ([]byte, error) {
 	return json.Marshal(h)
 }
 
-func UnmarshalHello(data []byte) (Hello, error) {
-	var h Hello
-	if err := json.Unmarshal(data, &h); err != nil {
-		return Hello{}, err
+func MarshalJSON[T any](v T) ([]byte, error) {
+	return json.Marshal(v)
+}
+
+func UnmarshalJSON[T any](data []byte) (T, error) {
+	var v T
+	if err := json.Unmarshal(data, &v); err != nil {
+		var zero T
+		return zero, err
 	}
-	return h, nil
+	return v, nil
 }
 
-func MarshalWelcome(w Welcome) ([]byte, error) {
-	return json.Marshal(w)
-}
-
-func UnmarshalWelcome(data []byte) (Welcome, error) {
-	var w Welcome
-	if err := json.Unmarshal(data, &w); err != nil {
-		return Welcome{}, err
-	}
-	return w, nil
-}
-
-func MarshalReject(r Reject) ([]byte, error) {
-	return json.Marshal(r)
-}
-func UnmarshalReject(data []byte) (Reject, error) {
-	var r Reject
-	if err := json.Unmarshal(data, &r); err != nil {
-		return Reject{}, err
-	}
-	return r, nil
-}
-
-func PeekControlType(data []byte) (string, error) {
+func PeekType(data []byte) (string, error) {
 	var e controlEnvelope
 	if err := json.Unmarshal(data, &e); err != nil {
 		return "", err

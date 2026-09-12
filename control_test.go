@@ -12,11 +12,11 @@ func TestWelcomeMarshalUnmarshal(t *testing.T) {
 		Timestamp:     time.Now().UnixMilli(),
 	}
 
-	data, err := MarshalWelcome(original)
+	data, err := MarshalJSON(original)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	result, err := UnmarshalWelcome(data)
+	result, err := UnmarshalJSON[Welcome](data)
 	if err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestHelloMarshalUnmarshal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	result, err := UnmarshalHello(data)
+	result, err := UnmarshalJSON[Hello](data)
 	if err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}

@@ -3,14 +3,17 @@ package protocol
 import lpprotocol "github.com/libp2p/go-libp2p/core/protocol"
 
 type RegisterRequest struct {
-	Type               string `json:"type"`
-	FName              string `json:"fname"`
-	SName              string `json:"sname"`
-	Login              string `json:"login"`
-	PasswordHash       []byte `json:"password_hash"`
-	PasswordSalt       []byte `json:"password_salt"`
-	LoginKeySalt       []byte `json:"login_key_salt"`
-	EncryptedMasterKey []byte `json:"encrypted_master_key"`
+	Type                 string `json:"type"`
+	FName                string `json:"fname"`
+	SName                string `json:"sname"`
+	Role                 string `json:"role"`
+	Login                string `json:"login"`
+	PasswordHash         []byte `json:"password_hash"`
+	PasswordSalt         []byte `json:"password_salt"`
+	LoginKeySalt         []byte `json:"login_key_salt"`
+	EncryptedMasterKey   []byte `json:"encrypted_master_key"`
+	IdentityPublicKey    []byte `json:"identity_public_key"`
+	EncryptedIdentityKey []byte `json:"encrypted_identity_key"`
 }
 
 type RegisterSuccess struct {
@@ -40,11 +43,13 @@ type LoginVerify struct {
 }
 
 type LoginSuccess struct {
-	Type               string `json:"type"`
-	FName              string `json:"fname"`
-	SName              string `json:"sname"`
-	SessionID          string `json:"session_id"`
-	EncryptedMasterKey []byte `json:"encrypted_master_key"`
+	Type                 string `json:"type"`
+	SessionID            string `json:"session_id"`
+	FName                string `json:"fname"`
+	SName                string `json:"sname"`
+	EncryptedMasterKey   []byte `json:"encrypted_master_key"`
+	IdentityPublicKey    []byte `json:"identity_public_key"`
+	EncryptedIdentityKey []byte `json:"encrypted_identity_key"`
 }
 
 type LoginFailure struct {

@@ -2,20 +2,33 @@ package protocol
 
 import lpprotocol "github.com/libp2p/go-libp2p/core/protocol"
 
+// PresenceUser — данные о человеке, которые сервер держит и рассылает,
+// пока тот в сети. PeerID нужен, чтобы можно было открыть чат сразу по
+// клику в nearby-списке, не спрашивая пользователя об адресе.
+type PresenceUser struct {
+	UserID string `json:"user_id"`
+	PeerID string `json:"peer_id"`
+	FName  string `json:"fname"`
+	SName  string `json:"sname"`
+}
+
 type PresenceOnline struct {
 	Type   string `json:"type"`
 	UserID string `json:"user_id"`
+	PeerID string `json:"peer_id"`
+	FName  string `json:"fname"`
+	SName  string `json:"sname"`
 }
 
 type PresenceSnapshot struct {
-	Type  string   `json:"type"`
-	Users []string `json:"users"`
+	Type  string         `json:"type"`
+	Users []PresenceUser `json:"users"`
 }
 
 type PresenceUpdate struct {
-	Type   string `json:"type"`
-	UserID string `json:"user_id"`
-	Status string `json:"status"`
+	Type   string       `json:"type"`
+	User   PresenceUser `json:"user"`
+	Status string       `json:"status"`
 }
 
 const (

@@ -51,6 +51,9 @@ type Message struct {
 	Signature []byte      `json:"signature"`
 	TTL       int         `json:"ttl,omitempty"`
 
+	FromUser   string `json:"from_user,omitempty"`
+	TargetUser string `json:"target_user,omitempty"`
+
 	TargetID string `json:"target_id"`
 	ChatID   string `json:"chat_id"`
 	From     string `json:"from"`
@@ -67,6 +70,8 @@ type unsignedMessage struct {
 	ID         string      `json:"id"`
 	TargetID   string      `json:"target_id"`
 	ChatID     string      `json:"chat_id"`
+	FromUser   string      `json:"from_user,omitempty"`
+	TargetUser string      `json:"target_user,omitempty"`
 	From       string      `json:"from"`
 	FromPubKey []byte      `json:"from_pub_key"`
 	Payload    []byte      `json:"payload"`
@@ -276,6 +281,8 @@ func (m Message) unsignedPayload(includeID bool) ([]byte, error) {
 		Type:       m.Type,
 		Target:     m.Target,
 		TargetID:   strings.TrimSpace(m.TargetID),
+		FromUser:   strings.TrimSpace(m.FromUser),
+		TargetUser: strings.TrimSpace(m.TargetUser),
 		ChatID:     strings.TrimSpace(m.ChatID),
 		From:       strings.TrimSpace(m.From),
 		FromPubKey: append([]byte(nil), m.FromPubKey...),

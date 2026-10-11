@@ -18,6 +18,18 @@ const SyncStreamProtocol = lpprotocol.ID("/syne/sync/1.0.0")
 
 // Vault может быть большим — лимит выше, чем DefaultReadLimit.
 const SyncMaxFrame uint32 = 64 * 1024 * 1024
+const (
+	SyncOpGroupList  = "group_list"  // мои группы + ключи чатов
+	SyncOpGroupSend  = "group_send"  // подписанное сообщение в группу
+	SyncOpGroupFetch = "group_fetch" // сообщения группы после after_id
+)
+
+type GroupInfo struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Emoji string `json:"emoji"`
+	Key   []byte `json:"key"` // общий ключ чата группы
+}
 
 const (
 	SyncOpVaultGet     = "vault_get"
@@ -37,6 +49,8 @@ type SyncRequest struct {
 	UserID    string  `json:"user_id,omitempty"` // key_lookup / mailbox_push: чей ключ / кому
 	Data      []byte  `json:"data,omitempty"`    // vault_put / mailbox_push
 	IDs       []int64 `json:"ids,omitempty"`     // mailbox_ack
+	GroupID   int64   `json:“group_id,omitempty”`
+	AfterID   int64   `json:"after_id,omitempty"`
 }
 
 type MailboxItem struct {
@@ -54,6 +68,7 @@ type SyncResponse struct {
 	SName             string        `json:"sname,omitempty"`
 	IdentityPublicKey []byte        `json:"identity_public_key,omitempty"`
 	Items             []MailboxItem `json:"items,omitempty"`
+	Groups            []GroupInfo   `json:“groups,omitempty”`
 }
 
 // ReadFramedMessageMax — как ReadFramedMessage, но с явным лимитом размера.

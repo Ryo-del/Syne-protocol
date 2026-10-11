@@ -10,7 +10,7 @@ const (
 	RoleStudent = "student"
 	RoleTeacher = "teacher"
 )
-
+const FilesOpListGroup = "list_group" // папки учеников внутри группы: Group — название группы
 // Action — право доступа к файлу или папке.
 //
 // Соответствие пунктам меню:
@@ -82,14 +82,17 @@ type ACLRule struct {
 
 // FileEntry — элемент списка папки.
 type FileEntry struct {
-	Name      string `json:"name"` // для корня чужой папки — «Фамилия Имя» владельца
-	Path      string `json:"path"` // относительно папки владельца, разделитель "/"
-	IsDir     bool   `json:"is_dir"`
-	Size      int64  `json:"size"`
-	ModTime   int64  `json:"mod_time"`          // unix ms
-	Owner     string `json:"owner"`             // логин владельца папки
-	OwnerName string `json:"owner_name"`        // «Фамилия Имя» владельца
-	Snippet   string `json:"snippet,omitempty"` // search: строка с совпадением в содержимом
+	Name       string `json:"name"` // для корня чужой папки — «Фамилия Имя» владельца
+	Path       string `json:"path"` // относительно папки владельца, разделитель "/"
+	IsDir      bool   `json:"is_dir"`
+	Size       int64  `json:"size"`
+	ModTime    int64  `json:"mod_time"`           // unix ms
+	Owner      string `json:"owner"`              // логин владельца папки
+	OwnerName  string `json:"owner_name"`         // «Фамилия Имя» владельца
+	Snippet    string `json:"snippet,omitempty"`  // search: строка с совпадением в содержимом
+	IsGroup    bool   `json:"is_group,omitempty"` // папка группы (верхний уровень «Сервера»)
+	Group      string `json:"group,omitempty"`    // группа владельца: путь выглядит как /Группа/Фамилия Имя/...
+	GroupEmoji string `json:"group_emoji,omitempty"`
 	// Can — что разрешено текущему пользователю (для серых пунктов меню).
 	// Ключи: настраиваемые действия плюс производные CapOpen, CapRename,
 	// CapDuplicate.
@@ -195,6 +198,7 @@ type FilesRequest struct {
 	Data     string   `json:"data,omitempty"`     // ui_put: JSON настроек интерфейса
 	Contacts []string `json:"contacts,omitempty"` // contacts_put: логины контактов
 	Blocked  []string `json:"blocked,omitempty"`  // blocked_put: логины заблокированных
+	Group    string   `json:"group,omitempty"`
 }
 
 type FilesResponse struct {

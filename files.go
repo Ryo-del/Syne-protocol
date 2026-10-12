@@ -11,6 +11,8 @@ const (
 	RoleTeacher = "teacher"
 )
 const FilesOpListGroup = "list_group" // папки учеников внутри группы: Group — название группы
+const FilesOpShareGroup = "share_group"
+
 // Action — право доступа к файлу или папке.
 //
 // Соответствие пунктам меню:

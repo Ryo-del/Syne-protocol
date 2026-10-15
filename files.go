@@ -191,7 +191,7 @@ type FilesRequest struct {
 	Users  []string `json:"users,omitempty"`
 
 	Size        int64 `json:"size,omitempty"`          // upload, write (этап 2б)
-	BaseModTime int64 `json:"base_mod_time,omitempty"` // write: версия, с которой начали правку
+	BaseModTime int64 `json:"base_mod_time,omitempty"` // write/upload replace: версия, с которой начали правку
 
 	Query   string `json:"query,omitempty"` // search (этап 2б)
 	Content bool   `json:"content,omitempty"`

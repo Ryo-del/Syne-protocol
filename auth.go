@@ -86,6 +86,36 @@ type ClaimFailure struct {
 	Reason string `json:"reason"`
 }
 
+// Password change preserves the current account keys and only rewraps them
+// with the key derived from the new password.
+type PasswordChangeRequest struct {
+	Type      string `json:"type"`
+	SessionID string `json:"session_id"`
+}
+
+type PasswordChangeChallenge struct {
+	Type         string `json:"type"`
+	PasswordSalt []byte `json:"password_salt"`
+}
+
+type PasswordChangeVerify struct {
+	Type                 string `json:"type"`
+	SessionID            string `json:"session_id"`
+	CurrentPasswordHash  []byte `json:"current_password_hash"`
+	PasswordHash         []byte `json:"password_hash"`
+	PasswordSalt         []byte `json:"password_salt"`
+	LoginKeySalt         []byte `json:"login_key_salt"`
+	EncryptedMasterKey   []byte `json:"encrypted_master_key"`
+	IdentityPublicKey    []byte `json:"identity_public_key"`
+	EncryptedIdentityKey []byte `json:"encrypted_identity_key"`
+}
+
+type PasswordChangeResult struct {
+	Type   string `json:"type"`
+	OK     bool   `json:"ok"`
+	Reason string `json:"reason,omitempty"`
+}
+
 const (
 	AuthTypeRegisterRequest = "register_request"
 	AuthTypeRegisterSuccess = "register_success"
@@ -100,6 +130,11 @@ const (
 	AuthTypeClaimRequest = "claim_request"
 	AuthTypeClaimSuccess = "claim_success"
 	AuthTypeClaimFailure = "claim_failure"
+
+	AuthTypePasswordChangeRequest   = "password_change_request"
+	AuthTypePasswordChangeChallenge = "password_change_challenge"
+	AuthTypePasswordChangeVerify    = "password_change_verify"
+	AuthTypePasswordChangeResult    = "password_change_result"
 )
 
 const AuthStreamProtocol = lpprotocol.ID("/syne/auth/1.0.0")

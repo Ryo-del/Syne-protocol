@@ -34,6 +34,8 @@ type GroupInfo struct {
 const (
 	SyncOpVaultGet     = "vault_get"
 	SyncOpVaultPut     = "vault_put"
+	SyncOpSettingsGet  = "settings_get"
+	SyncOpSettingsPut  = "settings_put"
 	SyncOpKeyLookup    = "key_lookup"
 	SyncOpMailboxPush  = "mailbox_push"
 	SyncOpMailboxFetch = "mailbox_fetch"

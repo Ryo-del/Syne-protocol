@@ -11,13 +11,30 @@ type Hello struct {
 	PeerID          string `json:"peer_id"`
 	ProtocolVersion uint8  `json:"protocol_version"`
 	Timestamp       int64  `json:"timestamp"`
+	ClientVersion   string `json:"client_version,omitempty"`
 }
+
+// ClientVersion is updated with the client release build and is sent in the server handshake.
+var ClientVersion = "0.1.0-dev"
 
 type Welcome struct {
 	Type          string `json:"type"`
 	ServerID      string `json:"server_id"`
 	ServerVersion string `json:"server_version"`
 	Timestamp     int64  `json:"timestamp"`
+	ClientUpdate  *ClientUpdate `json:"client_update,omitempty"`
+	HTTPPort      int    `json:"http_port,omitempty"`
+}
+
+type ClientUpdate struct {
+	Version string `json:"version"`
+	Name string `json:"name"`
+	SHA256 string `json:"sha256"`
+	Size int64 `json:"size"`
+	Signature string `json:"signature"`
+	DownloadPath string `json:"download_path"`
+	DownloadURL string `json:"download_url,omitempty"`
+	ReleaseNotes string `json:"release_notes,omitempty"`
 }
 type Reject struct {
 	Type      string `json:"type"`

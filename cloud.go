@@ -23,6 +23,8 @@ const (
 	CloudOpToken   = "cloud_token"
 	CloudOpResolve = "cloud_resolve"
 	CloudOpSyncNow = "cloud_sync_now"
+	// CloudOpGroups — чаты облака, которые сервер завёл для групп пользователя.
+	CloudOpGroups = "cloud_groups"
 )
 
 const CloudTypeResponse = "cloud_response"
@@ -54,6 +56,14 @@ type CloudAccount struct {
 	CloudUserID string `json:"cloud_user_id"`
 }
 
+// CloudGroupChat — групповой чат облака, соответствующий группе на сервере.
+// Чат создаёт и поддерживает сервер: в нём участники группы и преподаватели,
+// привязавшие облачный аккаунт.
+type CloudGroupChat struct {
+	GroupID int64  `json:"group_id"`
+	ChatID  string `json:"chat_id"`
+}
+
 type CloudStatus struct {
 	Enabled     bool   `json:"enabled"`   // на сервере задан адрес облака
 	CloudURL    string `json:"cloud_url"` // куда Syne Study отправляет на вход
@@ -78,4 +88,6 @@ type CloudResponse struct {
 	ExpiresAt   int64  `json:"expires_at,omitempty"` // unix ms
 	// cloud_resolve
 	Accounts []CloudAccount `json:"accounts,omitempty"`
+	// cloud_groups
+	Groups []CloudGroupChat `json:"groups,omitempty"`
 }

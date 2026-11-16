@@ -28,7 +28,9 @@ type GroupInfo struct {
 	ID    int64  `json:"id"`
 	Name  string `json:"name"`
 	Emoji string `json:"emoji"`
-	Key   []byte `json:"key"` // общий ключ чата группы
+	// Members — логины участников (ученики группы и преподаватели): по ним клиент
+	// берёт реестры устройств и шифрует на каждое. Состав определяет сервер колледжа.
+	Members []string `json:"members,omitempty"`
 }
 
 const (

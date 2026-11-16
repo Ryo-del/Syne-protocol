@@ -2,7 +2,10 @@ module github.com/Ryo-del/Syne-protocol
 
 go 1.26.5
 
-require github.com/libp2p/go-libp2p/core v0.43.0-rc2
+require (
+	github.com/libp2p/go-libp2p/core v0.43.0-rc2
+	golang.org/x/crypto v0.39.0
+)
 
 require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
@@ -20,7 +23,6 @@ require (
 	github.com/multiformats/go-multistream v0.6.1 // indirect
 	github.com/multiformats/go-varint v0.0.7 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
-	golang.org/x/crypto v0.39.0 // indirect
 	golang.org/x/exp v0.0.0-20250606033433-dcc06ee1d476 // indirect
 	golang.org/x/sys v0.33.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect

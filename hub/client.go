@@ -92,6 +92,7 @@ type Client struct {
 	peers    map[string]*peerCache
 	state    LinkState
 	deviceNm string
+	devType  string
 }
 
 type peerCache struct {
@@ -102,7 +103,14 @@ type peerCache struct {
 const peerTTL = 30 * time.Second
 
 func NewClient(call Caller, bl Blobber, deviceName string) *Client {
-	return &Client{call: call, bl: bl, now: time.Now, trust: NewTrustStore(), peers: map[string]*peerCache{}, deviceNm: deviceName}
+	return &Client{call: call, bl: bl, now: time.Now, trust: NewTrustStore(), peers: map[string]*peerCache{}, deviceNm: deviceName, devType: TypeStudy}
+}
+
+// SetDeviceType задаёт тип устройства в запросах и сертификатах (по умолчанию study).
+func (c *Client) SetDeviceType(t string) { c.mu.Lock(); c.devType = t; c.mu.Unlock() }
+
+func (c *Client) newRequest(code string) CertRequest {
+	return NewSignedRequest(c.login, c.deviceNm, c.devType, c.dev, code, c.now())
 }
 
 func (c *Client) do(ctx context.Context, req Request) (Response, error) {
@@ -263,7 +271,7 @@ func (c *Client) stateAfterLoadLocked(ctx context.Context, resetOpen bool) (Init
 	res := InitResult{Login: c.login}
 	if c.dev != nil {
 		res.DeviceID = c.dev.DeviceID()
-		if _, err := c.own.State().Trusted(res.DeviceID, c.now()); err == nil {
+		if _, err := c.own.State().Active(res.DeviceID, c.now()); err == nil {
 			c.state = StateReady
 			res.State = StateReady
 			return res, c.saveBlobIfPinsChanged(ctx)
@@ -291,7 +299,7 @@ func (c *Client) stateAfterLoadLocked(ctx context.Context, resetOpen bool) (Init
 			return res, err
 		}
 	}
-	req := NewCertRequest(c.login, c.deviceNm, c.dev, newCode())
+	req := c.newRequest(newCode())
 	if _, err := c.do(ctx, Request{Op: OpRequest, Req: &req}); err != nil {
 		return res, err
 	}
@@ -311,7 +319,7 @@ func (c *Client) createHubLocked(ctx context.Context, prevHubID string) (InitRes
 	if err != nil {
 		return InitResult{}, err
 	}
-	l, err := NewLog(root, c.login, NewCertRequest(c.login, c.deviceNm, dev, ""), prevHubID, c.now(), DefaultPolicy())
+	l, err := NewLog(root, c.login, NewSignedRequest(c.login, c.deviceNm, c.devType, dev, "", c.now()), prevHubID, c.now(), DefaultPolicy())
 	if err != nil {
 		return InitResult{}, err
 	}
@@ -395,7 +403,7 @@ func (c *Client) Refresh(ctx context.Context) (LinkState, error) {
 	}
 	c.own = l
 	if c.dev != nil {
-		if _, err := l.State().Trusted(c.dev.DeviceID(), c.now()); err == nil {
+		if _, err := l.State().Active(c.dev.DeviceID(), c.now()); err == nil {
 			if c.state != StateReady && c.state != StateCreated {
 				c.state = StateReady
 				return c.state, c.saveBlob(ctx)
@@ -418,6 +426,53 @@ func (c *Client) Devices() []Certificate {
 	return c.own.State().ActiveDevices(c.now())
 }
 
+// DeviceInfo — устройство пользователя с действующим статусом (Trusted — может подтверждать).
+type DeviceInfo struct {
+	Cert    Certificate
+	Trusted bool
+}
+
+// DeviceInfos — действующие устройства со статусами для экрана «Устройства».
+func (c *Client) DeviceInfos() []DeviceInfo {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.own == nil {
+		return nil
+	}
+	st := c.own.State()
+	var out []DeviceInfo
+	for _, cert := range st.ActiveDevices(c.now()) {
+		out = append(out, DeviceInfo{Cert: cert, Trusted: st.Devices[cert.DeviceID].Trusted})
+	}
+	return out
+}
+
+// BindAccount подписывает связь «аккаунт Syne Web (облака) ↔ эта идентичность Hub». Подписывает
+// только доверенное устройство; облако проверяет подпись по реестру и само связать не может.
+func (c *Client) BindAccount(accountID string) (Binding, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	dev, err := c.approverLocked()
+	if err != nil {
+		return Binding{}, err
+	}
+	return dev.SignBinding(c.login, accountID, c.now()), nil
+}
+
+// CanApprove — может ли это устройство подтверждать новые (доверенное ли оно).
+func (c *Client) CanApprove() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, err := c.approverLocked()
+	return err == nil
+}
+
+// Events — журнал безопасности пользователя (сервер колледжа).
+func (c *Client) Events(ctx context.Context) ([]SecurityEvent, error) {
+	resp, err := c.do(ctx, Request{Op: OpEvents})
+	return resp.Events, err
+}
+
 // Pending — запросы на регистрацию устройств, ожидающие подтверждения.
 func (c *Client) Pending(ctx context.Context) ([]PendingRequest, error) {
 	resp, err := c.do(ctx, Request{Op: OpPending})
@@ -431,12 +486,27 @@ func (c *Client) deviceLocked() (*DeviceKey, error) {
 	return c.dev, nil
 }
 
+// approverLocked — устройство готово И доверенное: только такое подтверждает, повышает и отзывает.
+func (c *Client) approverLocked() (*DeviceKey, error) {
+	dev, err := c.deviceLocked()
+	if err != nil {
+		return nil, err
+	}
+	if c.own == nil {
+		return nil, ErrNotReady
+	}
+	if err := c.own.State().CanApprove(dev.DeviceID(), c.now()); err != nil {
+		return nil, err
+	}
+	return dev, nil
+}
+
 // Approve — это устройство ручается за новое. pairCode — код, который пользователь
 // прочитал на экране нового устройства: без совпадения подтверждение невозможно.
-func (c *Client) Approve(ctx context.Context, deviceID, pairCode string) error {
+func (c *Client) Approve(ctx context.Context, deviceID string, trusted bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	dev, err := c.deviceLocked()
+	dev, err := c.approverLocked()
 	if err != nil {
 		return err
 	}
@@ -448,10 +518,10 @@ func (c *Client) Approve(ctx context.Context, deviceID, pairCode string) error {
 		if p.Req.DeviceID() != deviceID {
 			continue
 		}
-		if p.PairCode != strings.TrimSpace(pairCode) {
-			return ErrBadPairCode
+		if err := p.Req.Verify(c.now()); err != nil {
+			return err
 		}
-		cert, err := dev.Endorse(c.own.State().HubID, p.Req, c.now(), 0)
+		cert, err := dev.Endorse(c.own.State().HubID, p.Req, c.now(), 0, trusted)
 		if err != nil {
 			return err
 		}
@@ -468,6 +538,30 @@ func (c *Client) Approve(ctx context.Context, deviceID, pairCode string) error {
 	return ErrNoRequest
 }
 
+// Promote передаёт доверие уже привязанному устройству (настройки безопасности).
+func (c *Client) Promote(ctx context.Context, deviceID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	dev, err := c.approverLocked()
+	if err != nil {
+		return err
+	}
+	l, err := c.fetchLog(ctx, c.login, c.own)
+	if err != nil {
+		return err
+	}
+	p := NewPromotion(l.State().HubID, deviceID, l.HeadHash(), c.now())
+	dev.SignPromotion(p)
+	if _, err := c.do(ctx, Request{Op: OpPromote, Promotion: p}); err != nil {
+		return err
+	}
+	if l, err = c.fetchLog(ctx, c.login, l); err == nil {
+		c.own = l
+		c.trust.Observe(c.login, l)
+	}
+	return nil
+}
+
 // Reject отклоняет запрос регистрации.
 func (c *Client) Reject(ctx context.Context, deviceID string) error {
 	_, err := c.do(ctx, Request{Op: OpReject, DeviceID: deviceID})
@@ -479,7 +573,7 @@ func (c *Client) Reject(ctx context.Context, deviceID string) error {
 func (c *Client) Revoke(ctx context.Context, deviceID string, cascade bool) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	dev, err := c.deviceLocked()
+	dev, err := c.approverLocked()
 	if err != nil {
 		return err
 	}
@@ -535,8 +629,8 @@ func (c *Client) Recover(ctx context.Context, code string, revokeOthers bool) (I
 			return InitResult{}, err
 		}
 	}
-	if _, trusted := l.State().Trusted(c.dev.DeviceID(), c.now()); trusted != nil {
-		req := NewCertRequest(c.login, c.deviceNm, c.dev, newCode())
+	if _, trusted := l.State().Active(c.dev.DeviceID(), c.now()); trusted != nil {
+		req := c.newRequest(newCode())
 		if _, err := c.do(ctx, Request{Op: OpRequest, Req: &req}); err != nil {
 			return InitResult{}, err
 		}
@@ -681,13 +775,13 @@ func (c *Client) Decrypt(ctx context.Context, fromServerLogin string, env *Envel
 		}
 		return nil, err
 	}
-	cert, err := pl.State().Trusted(env.SenderID, c.now())
+	cert, err := pl.State().Active(env.SenderID, c.now())
 	if err != nil {
 		// Реестр мог обновиться после кэша: одна попытка со свежим.
 		if pl, err = c.peer(ctx, fromServerLogin, true); err != nil {
 			return nil, err
 		}
-		if cert, err = pl.State().Trusted(env.SenderID, c.now()); err != nil {
+		if cert, err = pl.State().Active(env.SenderID, c.now()); err != nil {
 			return nil, fmt.Errorf("hub: отправитель не доверен: %w", err)
 		}
 	}

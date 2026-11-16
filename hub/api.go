@@ -16,6 +16,8 @@ const (
 	OpApprove   = "approve"    // подтвердить: приложить сертификат
 	OpReject    = "reject"     // отклонить запрос
 	OpRevoke    = "revoke"     // отозвать устройство
+	OpPromote   = "promote"    // повысить привязанное устройство до доверенного
+	OpEvents    = "events"     // журнал безопасности
 	OpRecovery  = "recovery"   // получить/сохранить зашифрованную копию Root Key
 	OpPutBackup = "put_backup" // сохранить зашифрованную копию Root Key
 	OpPutDevice = "put_device" // сохранить зашифрованный blob устройства Study (ключ устройства, закладки доверия)
@@ -48,6 +50,7 @@ type Request struct {
 	Req        *CertRequest `json:"req,omitempty"`        // request
 	Cert       *Certificate `json:"cert,omitempty"`       // approve
 	Revocation *Revocation  `json:"revocation,omitempty"` // revoke
+	Promotion  *Promotion   `json:"promotion,omitempty"`  // promote
 	DeviceID   string       `json:"device_id,omitempty"`  // reject
 	Backup     []byte       `json:"backup,omitempty"`     // put_backup
 	Blob       []byte       `json:"blob,omitempty"`       // put_device
@@ -63,6 +66,29 @@ type PendingRequest struct {
 	Via       string      `json:"via,omitempty"` // "cloud" | "server"
 }
 
+// Состояния запроса в Holding.
+const (
+	RequestPending   = "pending"
+	RequestApproved  = "approved"
+	RequestRejected  = "rejected"
+	RequestExpired   = "expired"
+	RequestCancelled = "cancelled" // отменён инициатором или заменён новым запросом того же устройства
+)
+
+// SecurityEvent — запись журнала безопасности (без ключей и без содержимого переписки).
+type SecurityEvent struct {
+	ID        int64  `json:"id"`
+	At        int64  `json:"at"`
+	Login     string `json:"login"`
+	Kind      string `json:"kind"`   // request, received, approve, reject, promote, revoke, expire, reset, cancel
+	Actor     string `json:"actor"`  // DeviceID инициатора или "admin:<имя>"
+	Target    string `json:"target"` // DeviceID целевого устройства
+	Name      string `json:"name,omitempty"`
+	Result    string `json:"result"` // ok | denied | failed
+	Detail    string `json:"detail,omitempty"`
+	Operation string `json:"operation,omitempty"` // идентификатор операции (request_id)
+}
+
 // Response — ответ реестра.
 type Response struct {
 	OK        bool             `json:"ok"`
@@ -73,6 +99,7 @@ type Response struct {
 	Pending   []PendingRequest `json:"pending,omitempty"`
 	Backup    []byte           `json:"backup,omitempty"`
 	Blob      []byte           `json:"blob,omitempty"`
+	Events    []SecurityEvent  `json:"events,omitempty"`
 	Login     string           `json:"login,omitempty"`      // info: login@org владельца сессии
 	CloudURL  string           `json:"cloud_url,omitempty"`  // info: адрес Syne Cloud (Hub-входящие), если настроен
 	ResetOpen bool             `json:"reset_open,omitempty"` // info: администратор открыл сброс идентичности
@@ -89,3 +116,25 @@ type MirrorPush struct {
 type MirrorHeads struct {
 	Heads map[string]Head `json:"heads"`
 }
+
+// CloudOp — операция, подписанная доверенным устройством, которое не достаёт до сервера колледжа
+// (телефон): облако проверяет подпись по зеркалу реестра и кладёт операцию в очередь, а сервер
+// колледжа забирает, ПЕРЕПРОВЕРЯЕТ по своему реестру и применяет. Облако само ничего не применяет.
+type CloudOp struct {
+	ID         int64            `json:"id"`
+	Login      string           `json:"login"`
+	Kind       string           `json:"kind"` // approve | promote | revoke | reject
+	Cert       *Certificate     `json:"cert,omitempty"`
+	Promotion  *Promotion       `json:"promotion,omitempty"`
+	Revocation *Revocation      `json:"revocation,omitempty"`
+	Decision   *RequestDecision `json:"decision,omitempty"`
+	RequestID  string           `json:"request_id,omitempty"` // cancel
+}
+
+const (
+	OpKindApprove = "approve"
+	OpKindPromote = "promote"
+	OpKindRevoke  = "revoke"
+	OpKindReject  = "reject"
+	OpKindCancel  = "cancel" // инициатор отменил свой запрос (ставит облако)
+)

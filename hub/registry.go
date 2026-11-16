@@ -17,17 +17,19 @@ const (
 	KindGenesis EntryKind = "genesis" // создание Hub: корневой ключ и первое устройство
 	KindAdd     EntryKind = "add"     // сертификат нового устройства
 	KindRevoke  EntryKind = "revoke"  // отзыв устройства
+	KindPromote EntryKind = "promote" // повышение привязанного устройства до доверенного
 )
 
 var (
-	ErrChain       = errors.New("hub: разрыв или подмена цепочки реестра")
-	ErrUntrusted   = errors.New("hub: устройство не доверено")
-	ErrNotAllowed  = errors.New("hub: действие не разрешено политикой")
-	ErrRollback    = errors.New("hub: реестр откатился назад")
-	ErrFork        = errors.New("hub: реестр разошёлся с известной копией")
-	ErrUnknownHub  = errors.New("hub: неизвестный Hub")
-	ErrNoDevice    = errors.New("hub: устройство не найдено")
-	ErrDeviceRevok = errors.New("hub: устройство отозвано")
+	ErrChain            = errors.New("hub: разрыв или подмена цепочки реестра")
+	ErrUntrusted        = errors.New("hub: устройство не доверено")
+	ErrNotAllowed       = errors.New("hub: действие не разрешено политикой")
+	ErrRollback         = errors.New("hub: реестр откатился назад")
+	ErrFork             = errors.New("hub: реестр разошёлся с известной копией")
+	ErrUnknownHub       = errors.New("hub: неизвестный Hub")
+	ErrNoDevice         = errors.New("hub: устройство не найдено")
+	ErrDeviceRevok      = errors.New("hub: устройство отозвано")
+	ErrNotTrustedDevice = errors.New("hub: устройство привязано, но не доверенное: подтверждать устройства оно не может")
 )
 
 // Genesis — содержимое первой записи.
@@ -36,6 +38,31 @@ type Genesis struct {
 	RootPub   []byte      `json:"root_pub"`
 	PrevHubID string      `json:"prev_hub_id,omitempty"` // при сбросе идентичности — прежний Hub
 	Cert      Certificate `json:"cert"`
+}
+
+// Promotion — подписанное повышение привязанного устройства до доверенного («Сделать доверенным»
+// в настройках). Подписывает доверенное устройство (не повышаемое) или Root Key. PrevHash
+// привязывает подпись к месту в журнале, как и у отзыва.
+type Promotion struct {
+	Version  int       `json:"v"`
+	HubID    string    `json:"hub_id"`
+	DeviceID string    `json:"device_id"`
+	PrevHash string    `json:"prev_hash"`
+	At       int64     `json:"at"`
+	Sig      Signature `json:"sig"`
+}
+
+func (p *Promotion) signedBytes() []byte {
+	return newEnc("syne-hub-promote-v1").u64(uint64(p.Version)).str(p.HubID).str(p.DeviceID).str(p.PrevHash).u64(uint64(p.At)).b
+}
+
+// NewPromotion готовит повышение; подпись добавляет SignPromotion.
+func NewPromotion(hubID, deviceID, prevHash string, at time.Time) *Promotion {
+	return &Promotion{Version: Version, HubID: hubID, DeviceID: deviceID, PrevHash: prevHash, At: at.Unix()}
+}
+
+func (d *DeviceKey) SignPromotion(p *Promotion) {
+	p.Sig = Signature{Signer: d.DeviceID(), Sig: d.Sign(p.signedBytes())}
 }
 
 // Signature — подпись под отзывом: устройством либо корневым ключом.
@@ -117,6 +144,8 @@ type DeviceState struct {
 	Revoked   bool
 	RevokedAt int64
 	AddedSeq  uint64
+	// Trusted — действующее право подтверждать новые устройства: из сертификата либо из promote.
+	Trusted bool
 }
 
 // State — результат проверки и разбора журнала.
@@ -130,9 +159,9 @@ type State struct {
 	Policy    Policy
 }
 
-// Trusted возвращает сертификат, если устройство сейчас доверено (не отозвано, срок
-// не истёк). Иначе — ошибка с причиной.
-func (s *State) Trusted(deviceID string, now time.Time) (*Certificate, error) {
+// Active возвращает сертификат, если устройство сейчас действует (привязано или доверенное, не
+// отозвано, срок не истёк): такое устройство читает и пишет сообщения. Иначе — ошибка с причиной.
+func (s *State) Active(deviceID string, now time.Time) (*Certificate, error) {
 	d, ok := s.Devices[deviceID]
 	if !ok {
 		return nil, ErrNoDevice
@@ -146,7 +175,19 @@ func (s *State) Trusted(deviceID string, now time.Time) (*Certificate, error) {
 	return &d.Cert, nil
 }
 
-// ActiveDevices — доверенные устройства, по порядку добавления.
+// CanApprove — действует ли устройство И является ли оно доверенным (может подтверждать
+// новые устройства, повышать и отзывать). Обычное привязанное устройство — ErrNotTrustedDevice.
+func (s *State) CanApprove(deviceID string, now time.Time) error {
+	if _, err := s.Active(deviceID, now); err != nil {
+		return err
+	}
+	if !s.Devices[deviceID].Trusted {
+		return ErrNotTrustedDevice
+	}
+	return nil
+}
+
+// ActiveDevices — действующие устройства, по порядку добавления.
 func (s *State) ActiveDevices(now time.Time) []Certificate {
 	var out []*DeviceState
 	for _, d := range s.Devices {
@@ -207,7 +248,7 @@ func applyGenesis(e *Entry, pol Policy) (*State, error) {
 	if err := c.checkShape(); err != nil {
 		return nil, err
 	}
-	if c.IssuedBy != IssuerRoot || c.HubID != hubID || c.Login != g.Login {
+	if c.IssuedBy != IssuerRoot || c.HubID != hubID || c.Login != g.Login || !c.Trusted {
 		return nil, fmt.Errorf("%w: сертификат первого устройства", ErrFormat)
 	}
 	if !ed25519.Verify(root, c.signedBytes(), c.Sig) {
@@ -215,7 +256,7 @@ func applyGenesis(e *Entry, pol Policy) (*State, error) {
 	}
 	return &State{
 		Login: g.Login, HubID: hubID, PrevHubID: g.PrevHubID, RootPub: root, Policy: pol,
-		Devices: map[string]*DeviceState{c.DeviceID: {Cert: c, AddedSeq: e.Seq}},
+		Devices: map[string]*DeviceState{c.DeviceID: {Cert: c, AddedSeq: e.Seq, Trusted: true}},
 	}, nil
 }
 
@@ -233,6 +274,12 @@ func (s *State) apply(e *Entry) error {
 			return fmt.Errorf("%w: %v", ErrFormat, err)
 		}
 		return s.applyRevoke(r, e.PrevHash)
+	case KindPromote:
+		var p Promotion
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return fmt.Errorf("%w: %v", ErrFormat, err)
+		}
+		return s.applyPromote(p, e.PrevHash)
 	}
 	return fmt.Errorf("%w: тип записи %q", ErrFormat, e.Kind)
 }
@@ -256,11 +303,14 @@ func (s *State) applyAdd(c Certificate, seq uint64) error {
 		if !ok || issuer.Revoked {
 			return fmt.Errorf("%w: поручитель %s", ErrUntrusted, c.IssuedBy)
 		}
+		if !issuer.Trusted {
+			return fmt.Errorf("%w: поручитель %s", ErrNotTrustedDevice, c.IssuedBy)
+		}
 		if !ed25519.Verify(issuer.Cert.SignPub, c.signedBytes(), c.Sig) {
 			return ErrSignature
 		}
 	}
-	s.Devices[c.DeviceID] = &DeviceState{Cert: c, AddedSeq: seq}
+	s.Devices[c.DeviceID] = &DeviceState{Cert: c, AddedSeq: seq, Trusted: c.Trusted}
 	return nil
 }
 
@@ -287,6 +337,9 @@ func (s *State) applyRevoke(r Revocation, prevHash string) error {
 		if !ok || d.Revoked || sg.Signer == r.DeviceID {
 			return fmt.Errorf("%w: подписант %s", ErrUntrusted, sg.Signer)
 		}
+		if !d.Trusted {
+			return fmt.Errorf("%w: подписант %s", ErrNotTrustedDevice, sg.Signer)
+		}
 		if !ed25519.Verify(d.Cert.SignPub, msg, sg.Sig) {
 			return ErrSignature
 		}
@@ -296,6 +349,41 @@ func (s *State) applyRevoke(r Revocation, prevHash string) error {
 		return fmt.Errorf("%w: нужно подписей устройств: %d", ErrNotAllowed, s.Policy.need())
 	}
 	s.revokeDevice(target, r.At, r.Cascade)
+	return nil
+}
+
+func (s *State) applyPromote(p Promotion, prevHash string) error {
+	if p.Version != Version || p.HubID != s.HubID || p.PrevHash != prevHash {
+		return fmt.Errorf("%w: повышение не относится к этому месту журнала", ErrChain)
+	}
+	target, ok := s.Devices[p.DeviceID]
+	if !ok {
+		return ErrNoDevice
+	}
+	if target.Revoked {
+		return ErrDeviceRevok
+	}
+	if target.Trusted {
+		return fmt.Errorf("%w: устройство уже доверенное", ErrNotAllowed)
+	}
+	msg := p.signedBytes()
+	if p.Sig.Signer == IssuerRoot {
+		if !ed25519.Verify(s.RootPub, msg, p.Sig.Sig) {
+			return ErrSignature
+		}
+	} else {
+		d, ok := s.Devices[p.Sig.Signer]
+		if !ok || d.Revoked || p.Sig.Signer == p.DeviceID {
+			return fmt.Errorf("%w: подписант %s", ErrUntrusted, p.Sig.Signer)
+		}
+		if !d.Trusted {
+			return fmt.Errorf("%w: подписант %s", ErrNotTrustedDevice, p.Sig.Signer)
+		}
+		if !ed25519.Verify(d.Cert.SignPub, msg, p.Sig.Sig) {
+			return ErrSignature
+		}
+	}
+	target.Trusted = true
 	return nil
 }
 
@@ -379,6 +467,9 @@ func (l *Log) AddDevice(c Certificate) error { return l.append(KindAdd, c) }
 // Revoke принимает отзыв. r должен быть создан через NewRevocation с PrevHash =
 // l.HeadHash() и подписан нужным числом устройств.
 func (l *Log) Revoke(r *Revocation) error { return l.append(KindRevoke, r) }
+
+// Promote принимает повышение устройства до доверенного.
+func (l *Log) Promote(p *Promotion) error { return l.append(KindPromote, p) }
 
 // CheckAgainst сравнивает реестр с ранее известной вершиной (pin): откат назад и
 // расхождение истории обнаруживаются.

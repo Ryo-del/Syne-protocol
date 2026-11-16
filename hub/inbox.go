@@ -76,8 +76,14 @@ func VerifyPost(p *InboxPost, cert Certificate) error {
 	return nil
 }
 
-func fetchBytes(login string, after int64, ts int64) []byte {
-	return newEnc("syne-inbox-fetch-v1").str(login).u64(uint64(after)).u64(uint64(ts)).b
+// Домены подписи запросов устройства к облаку.
+const (
+	DomainInboxFetch    = "syne-inbox-fetch-v1"
+	DomainRequestsFetch = "syne-requests-fetch-v1" // список ожидающих запросов (только доверенным)
+)
+
+func fetchBytes(domain, login string, after int64, ts int64) []byte {
+	return newEnc(domain).str(login).u64(uint64(after)).u64(uint64(ts)).b
 }
 
 // FetchAuth — подпись запроса входящих устройством.
@@ -89,8 +95,13 @@ type FetchAuth struct {
 
 // SignFetch подписывает запрос «отдайте входящие login после after».
 func (d *DeviceKey) SignFetch(login string, after int64, now time.Time) FetchAuth {
+	return d.SignAction(DomainInboxFetch, login, after, now)
+}
+
+// SignAction подписывает запрос к облаку в заданном домене.
+func (d *DeviceKey) SignAction(domain, login string, after int64, now time.Time) FetchAuth {
 	ts := now.Unix()
-	return FetchAuth{DeviceID: d.DeviceID(), TS: ts, Sig: d.Sign(fetchBytes(login, after, ts))}
+	return FetchAuth{DeviceID: d.DeviceID(), TS: ts, Sig: d.Sign(fetchBytes(domain, login, after, ts))}
 }
 
 // FetchWindow — допустимое расхождение часов при проверке запроса.
@@ -99,13 +110,88 @@ const FetchWindow = 5 * time.Minute
 // VerifyFetch проверяет подпись запроса и свежесть метки времени. cert — сертификат
 // a.DeviceID из реестра login (уже проверенный Trusted).
 func VerifyFetch(a FetchAuth, login string, after int64, cert Certificate, now time.Time) error {
+	return VerifyAction(DomainInboxFetch, a, login, after, cert, now)
+}
+
+// VerifyAction — как VerifyFetch для любого домена.
+func VerifyAction(domain string, a FetchAuth, login string, after int64, cert Certificate, now time.Time) error {
 	if cert.Login != login || cert.DeviceID != a.DeviceID {
 		return fmt.Errorf("%w: устройство не из реестра %s", ErrSignature, login)
 	}
 	if d := now.Sub(time.Unix(a.TS, 0)); d > FetchWindow || d < -FetchWindow {
 		return fmt.Errorf("%w: метка времени вне окна", ErrSignature)
 	}
-	if !ed25519.Verify(cert.SignPub, fetchBytes(login, after, a.TS), a.Sig) {
+	if !ed25519.Verify(cert.SignPub, fetchBytes(domain, login, after, a.TS), a.Sig) {
+		return ErrSignature
+	}
+	return nil
+}
+
+// Binding — подписанная связь «аккаунт Syne Web ↔ идентичность Hub». Её создаёт доверенное
+// устройство (Study) при привязке аккаунта; облако проверяет подпись по зеркалу реестра, поэтому
+// сам подделать связь не может (иначе оно могло бы подсунуть телефону чужой логин).
+type Binding struct {
+	HubLogin  string `json:"hub_login"`
+	AccountID string `json:"account_id"` // идентификатор аккаунта облака (Syne Web Account)
+	At        int64  `json:"at"`
+	DeviceID  string `json:"device_id"`
+	Sig       []byte `json:"sig"`
+}
+
+func (b Binding) signedBytes() []byte {
+	return newEnc("syne-account-binding-v1").str(b.HubLogin).str(b.AccountID).u64(uint64(b.At)).b
+}
+
+// SignBinding подписывает связь ключом (доверенного) устройства.
+func (d *DeviceKey) SignBinding(hubLogin, accountID string, now time.Time) Binding {
+	b := Binding{HubLogin: hubLogin, AccountID: accountID, At: now.Unix(), DeviceID: d.DeviceID()}
+	b.Sig = d.Sign(b.signedBytes())
+	return b
+}
+
+// VerifyBinding проверяет подпись и свежесть. cert — сертификат b.DeviceID из реестра b.HubLogin;
+// вызывающий обязан проверить, что устройство доверенное (State.CanApprove).
+func VerifyBinding(b Binding, cert Certificate, now time.Time) error {
+	if cert.Login != b.HubLogin || cert.DeviceID != b.DeviceID || b.AccountID == "" {
+		return fmt.Errorf("%w: связь аккаунта", ErrSignature)
+	}
+	if d := now.Sub(time.Unix(b.At, 0)); d > 10*time.Minute || d < -10*time.Minute {
+		return fmt.Errorf("%w: метка времени вне окна", ErrSignature)
+	}
+	if !ed25519.Verify(cert.SignPub, b.signedBytes(), b.Sig) {
+		return ErrSignature
+	}
+	return nil
+}
+
+// RequestDecision — подписанный отказ доверенного устройства по запросу (Rejected в Holding).
+type RequestDecision struct {
+	RequestID string `json:"request_id"`
+	DeviceID  string `json:"device_id"` // устройство, чей запрос отклонён
+	Login     string `json:"login"`
+	At        int64  `json:"at"`
+	By        string `json:"by"` // DeviceID подписавшего
+	Sig       []byte `json:"sig"`
+}
+
+func (r RequestDecision) signedBytes() []byte {
+	return newEnc("syne-request-reject-v1").str(r.RequestID).str(r.DeviceID).str(r.Login).u64(uint64(r.At)).str(r.By).b
+}
+
+func (d *DeviceKey) SignReject(login, requestID, targetDeviceID string, now time.Time) RequestDecision {
+	r := RequestDecision{RequestID: requestID, DeviceID: targetDeviceID, Login: login, At: now.Unix(), By: d.DeviceID()}
+	r.Sig = d.Sign(r.signedBytes())
+	return r
+}
+
+func VerifyReject(r RequestDecision, cert Certificate, now time.Time) error {
+	if cert.Login != r.Login || cert.DeviceID != r.By {
+		return fmt.Errorf("%w: отказ", ErrSignature)
+	}
+	if d := now.Sub(time.Unix(r.At, 0)); d > FetchWindow*2 || d < -FetchWindow*2 {
+		return fmt.Errorf("%w: метка времени вне окна", ErrSignature)
+	}
+	if !ed25519.Verify(cert.SignPub, r.signedBytes(), r.Sig) {
 		return ErrSignature
 	}
 	return nil

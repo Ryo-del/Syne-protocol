@@ -36,7 +36,7 @@ func (f *fixture) addDevice(t *testing.T, name string, by *DeviceKey) *DeviceKey
 	t.Helper()
 	d, err := GenerateDeviceKey()
 	must(t, err)
-	cert, err := by.Endorse(f.log.State().HubID, NewCertRequest("ivan@school1", name, d, "1"), t0, 0)
+	cert, err := by.Endorse(f.log.State().HubID, NewCertRequest("ivan@school1", name, d, "1"), t0, 0, true)
 	must(t, err)
 	must(t, f.log.AddDevice(cert))
 	return d
@@ -48,7 +48,7 @@ func TestChainOfTrust(t *testing.T) {
 	tablet := f.addDevice(t, "iPad", phone) // поручитель — телефон, не Study
 	st := f.log.State()
 	for _, d := range []*DeviceKey{f.study, phone, tablet} {
-		if _, err := st.Trusted(d.DeviceID(), t0); err != nil {
+		if _, err := st.Active(d.DeviceID(), t0); err != nil {
 			t.Fatalf("%s: %v", d.DeviceID(), err)
 		}
 	}
@@ -64,7 +64,7 @@ func TestRejectsUntrustedIssuer(t *testing.T) {
 	f := newFixture(t, DefaultPolicy())
 	stranger, _ := GenerateDeviceKey()
 	d, _ := GenerateDeviceKey()
-	cert, err := stranger.Endorse(f.log.State().HubID, NewCertRequest("ivan@school1", "Evil", d, "1"), t0, 0)
+	cert, err := stranger.Endorse(f.log.State().HubID, NewCertRequest("ivan@school1", "Evil", d, "1"), t0, 0, true)
 	must(t, err)
 	if err := f.log.AddDevice(cert); !errors.Is(err, ErrUntrusted) {
 		t.Fatalf("ожидали ErrUntrusted, получили %v", err)
@@ -84,7 +84,7 @@ func TestRejectsForeignRootAndTamperedCert(t *testing.T) {
 		t.Fatalf("чужой корень: %v", err)
 	}
 	// Подмена ключа в сертификате ломает device_id.
-	good, _ := f.study.Endorse(f.log.State().HubID, NewCertRequest("ivan@school1", "ok", d, "1"), t0, 0)
+	good, _ := f.study.Endorse(f.log.State().HubID, NewCertRequest("ivan@school1", "ok", d, "1"), t0, 0, true)
 	other, _ := GenerateDeviceKey()
 	good.AgreePub = other.AgreePub
 	if err := f.log.AddDevice(good); !errors.Is(err, ErrFormat) {
@@ -123,12 +123,12 @@ func TestRevocation(t *testing.T) {
 	r = NewRevocation(f.log.State().HubID, phone.DeviceID(), f.log.HeadHash(), false, t0)
 	r.Sign(f.study)
 	must(t, f.log.Revoke(r))
-	if _, err := f.log.State().Trusted(phone.DeviceID(), t0); !errors.Is(err, ErrDeviceRevok) {
+	if _, err := f.log.State().Active(phone.DeviceID(), t0); !errors.Is(err, ErrDeviceRevok) {
 		t.Fatalf("после отзыва: %v", err)
 	}
 	// Отозванный не может поручиться за новое устройство.
 	d, _ := GenerateDeviceKey()
-	cert, _ := phone.Endorse(f.log.State().HubID, NewCertRequest("ivan@school1", "x", d, "1"), t0, 0)
+	cert, _ := phone.Endorse(f.log.State().HubID, NewCertRequest("ivan@school1", "x", d, "1"), t0, 0, true)
 	if err := f.log.AddDevice(cert); !errors.Is(err, ErrUntrusted) {
 		t.Fatalf("поручитель отозван: %v", err)
 	}
@@ -175,10 +175,10 @@ func TestCascadeRevocation(t *testing.T) {
 	r := NewRevocation(f.log.State().HubID, phone.DeviceID(), f.log.HeadHash(), true, t0)
 	r.Sign(f.study)
 	must(t, f.log.Revoke(r))
-	if _, err := f.log.State().Trusted(tablet.DeviceID(), t0); !errors.Is(err, ErrDeviceRevok) {
+	if _, err := f.log.State().Active(tablet.DeviceID(), t0); !errors.Is(err, ErrDeviceRevok) {
 		t.Fatalf("каскад не сработал: %v", err)
 	}
-	if _, err := f.log.State().Trusted(f.study.DeviceID(), t0); err != nil {
+	if _, err := f.log.State().Active(f.study.DeviceID(), t0); err != nil {
 		t.Fatal("Study не должен пострадать")
 	}
 }
@@ -186,12 +186,12 @@ func TestCascadeRevocation(t *testing.T) {
 func TestExpiry(t *testing.T) {
 	f := newFixture(t, DefaultPolicy())
 	d, _ := GenerateDeviceKey()
-	cert, _ := f.study.Endorse(f.log.State().HubID, NewCertRequest("ivan@school1", "temp", d, "1"), t0, time.Hour)
+	cert, _ := f.study.Endorse(f.log.State().HubID, NewCertRequest("ivan@school1", "temp", d, "1"), t0, time.Hour, true)
 	must(t, f.log.AddDevice(cert))
-	if _, err := f.log.State().Trusted(d.DeviceID(), t0.Add(30*time.Minute)); err != nil {
+	if _, err := f.log.State().Active(d.DeviceID(), t0.Add(30*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.log.State().Trusted(d.DeviceID(), t0.Add(2*time.Hour)); !errors.Is(err, ErrUntrusted) {
+	if _, err := f.log.State().Active(d.DeviceID(), t0.Add(2*time.Hour)); !errors.Is(err, ErrUntrusted) {
 		t.Fatalf("срок не проверен: %v", err)
 	}
 }
@@ -362,7 +362,7 @@ func TestInboxAuth(t *testing.T) {
 
 	// Чужой сертификат / подделанный отправитель / порча подписи.
 	other, _ := GenerateDeviceKey()
-	ocert, _ := f.study.Endorse(f.log.State().HubID, NewCertRequest("ivan@school1", "o", other, "x"), t0, 0)
+	ocert, _ := f.study.Endorse(f.log.State().HubID, NewCertRequest("ivan@school1", "o", other, "x"), t0, 0, true)
 	if err := VerifyPost(p, ocert); !errors.Is(err, ErrSignature) {
 		t.Fatalf("чужой сертификат: %v", err)
 	}

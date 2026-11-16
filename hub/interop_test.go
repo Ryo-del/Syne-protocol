@@ -37,6 +37,7 @@ type vectors struct {
 	Head        Head     `json:"head"`
 	Active      []string `json:"active"`
 	Revoked     []string `json:"revoked"`
+	TrustedIDs  []string `json:"trusted_ids"` // действующие доверенные (могут подтверждать)
 	CertRequest struct {
 		Req      CertRequest `json:"req"`
 		PairCode string      `json:"pair_code"`
@@ -75,12 +76,12 @@ func TestGenerateInteropVectors(t *testing.T) {
 	must(t, err)
 	v.RootSeed, v.RootPub, v.HubID = root.Seed(), root.Pub, root.HubID()
 
-	study, phone, tablet := detDevice(t, 10), detDevice(t, 20), detDevice(t, 30)
+	study, phone, tablet, bound := detDevice(t, 10), detDevice(t, 20), detDevice(t, 30), detDevice(t, 60)
 	v.Devices = map[string]struct {
 		Raw []byte `json:"raw"`
 		ID  string `json:"id"`
 	}{}
-	for name, d := range map[string]*DeviceKey{"study": study, "phone": phone, "tablet": tablet} {
+	for name, d := range map[string]*DeviceKey{"study": study, "phone": phone, "tablet": tablet, "bound": bound} {
 		v.Devices[name] = struct {
 			Raw []byte `json:"raw"`
 			ID  string `json:"id"`
@@ -88,15 +89,19 @@ func TestGenerateInteropVectors(t *testing.T) {
 	}
 
 	at := time.Unix(1_800_000_000, 0)
-	l, err := NewLog(root, v.Login, NewCertRequest(v.Login, "Syne Study", study, ""), "", at, DefaultPolicy())
+	l, err := NewLog(root, v.Login, NewSignedRequest(v.Login, "Syne Study", TypeStudy, study, "", at), "", at, DefaultPolicy())
 	must(t, err)
-	add := func(by, d *DeviceKey, name string) {
-		c, err := by.Endorse(l.State().HubID, NewCertRequest(v.Login, name, d, "x"), at, 0)
+	add := func(by, d *DeviceKey, name, typ string, trusted bool) {
+		c, err := by.Endorse(l.State().HubID, NewSignedRequest(v.Login, name, typ, d, "x", at), at, 0, trusted)
 		must(t, err)
 		must(t, l.AddDevice(c))
 	}
-	add(study, phone, "iPhone")
-	add(phone, tablet, "iPad")
+	add(study, phone, "iPhone", TypeIOS, true)       // «Да и сделать доверенным»
+	add(study, bound, "Ноутбук", TypeDesktop, false) // «Да»: привязанное
+	add(phone, tablet, "iPad", TypeIOS, false)       // поручитель — доверенный телефон
+	p := NewPromotion(l.State().HubID, tablet.DeviceID(), l.HeadHash(), at)
+	study.SignPromotion(p)
+	must(t, l.Promote(p)) // передача доверия через настройки
 	r := NewRevocation(l.State().HubID, tablet.DeviceID(), l.HeadHash(), false, at)
 	r.Sign(study)
 	must(t, l.Revoke(r))
@@ -105,8 +110,13 @@ func TestGenerateInteropVectors(t *testing.T) {
 		v.Active = append(v.Active, c.DeviceID)
 	}
 	v.Revoked = []string{tablet.DeviceID()}
+	for _, c := range l.State().ActiveDevices(at) {
+		if l.State().Devices[c.DeviceID].Trusted {
+			v.TrustedIDs = append(v.TrustedIDs, c.DeviceID)
+		}
+	}
 
-	v.CertRequest.Req = NewCertRequest("petya@org7", "Телефон Пети", phone, "abc123")
+	v.CertRequest.Req = NewSignedRequest("petya@org7", "Телефон Пети", TypeIOS, phone, "abc123", at)
 	v.CertRequest.PairCode = v.CertRequest.Req.PairCode()
 
 	other, _ := RootKeyFromSeed(seeded(2))
@@ -119,12 +129,12 @@ func TestGenerateInteropVectors(t *testing.T) {
 	// Конверт от Study Ивана: читают iPhone Ивана и (чужой) Петя.
 	pdev := detDevice(t, 40)
 	proot, _ := RootKeyFromSeed(seeded(3))
-	plog, err := NewLog(proot, "petya@org7", NewCertRequest("petya@org7", "PC", pdev, ""), "", at, DefaultPolicy())
+	plog, err := NewLog(proot, "petya@org7", NewSignedRequest("petya@org7", "PC", TypeStudy, pdev, "", at), "", at, DefaultPolicy())
 	must(t, err)
 	rcpts := append(l.State().ActiveDevices(at), plog.State().ActiveDevices(at)...)
 	v.PeerEntries = plog.Entries
 	proot2, _ := RootKeyFromSeed(seeded(4))
-	plog2, err := NewLog(proot2, "petya@org7", NewCertRequest("petya@org7", "New PC", detDevice(t, 50), ""), proot.HubID(), at, DefaultPolicy())
+	plog2, err := NewLog(proot2, "petya@org7", NewSignedRequest("petya@org7", "New PC", TypeStudy, detDevice(t, 50), "", at), proot.HubID(), at, DefaultPolicy())
 	must(t, err)
 	v.PeerResetEntries = plog2.Entries
 	v.Envelope.Plaintext = []byte("Привет из Go: проверка совместимости ✓")
@@ -139,10 +149,15 @@ func TestGenerateInteropVectors(t *testing.T) {
 }
 
 type swiftVectors struct {
-	Plaintext []byte    `json:"plaintext"`
-	Context   []byte    `json:"context"`
-	SenderRaw []byte    `json:"sender_raw"` // seed устройства-отправителя (Swift)
-	Env       *Envelope `json:"env"`
+	Entries   []Entry         `json:"entries"`
+	Request   CertRequest     `json:"request"`
+	Endorsed  Certificate     `json:"endorsed"`
+	Promo     Promotion       `json:"promotion"`
+	Reject    RequestDecision `json:"reject"`
+	Plaintext []byte          `json:"plaintext"`
+	Context   []byte          `json:"context"`
+	SenderRaw []byte          `json:"sender_raw"` // seed устройства-отправителя (Swift)
+	Env       *Envelope       `json:"env"`
 	Fetch     struct {
 		Login string `json:"login"`
 		After int64  `json:"after"`
@@ -165,6 +180,24 @@ func TestSwiftInterop(t *testing.T) {
 	var s swiftVectors
 	must(t, json.Unmarshal(raw, &s))
 
+	// Доверенный iPhone (Swift) подтверждает устройство, повышает другое и отклоняет запрос; Go принимает
+	// всё тем же кодом, что и сервер колледжа.
+	l, err := LoadLog(s.Entries, DefaultPolicy())
+	must(t, err)
+	must(t, s.Request.Verify(time.Unix(s.Request.CreatedAt, 0)))
+	// Повышение подписано по вершине исходного журнала (prev_hash), поэтому применяется первым.
+	must(t, l.Promote(&s.Promo))
+	if !l.State().Devices[s.Promo.DeviceID].Trusted {
+		t.Fatal("повышение, подписанное Swift, не сработало")
+	}
+	must(t, l.AddDevice(s.Endorsed))
+	if l.State().Devices[s.Endorsed.DeviceID].Trusted {
+		t.Fatal("после «Да» (trusted=false) устройство не должно быть доверенным")
+	}
+	phoneCert := l.State().Devices[s.Reject.By].Cert
+	must(t, l.State().CanApprove(s.Reject.By, time.Unix(s.Reject.At, 0)))
+	must(t, VerifyReject(s.Reject, phoneCert, time.Unix(s.Reject.At, 0)))
+
 	// Swift-устройство (ключи из seed) подписало конверт; Go-устройство получателя его читает.
 	sender, err := UnmarshalDeviceKey(s.SenderRaw)
 	must(t, err)
@@ -178,6 +211,10 @@ func TestSwiftInterop(t *testing.T) {
 	fa := FetchAuth{DeviceID: sender.DeviceID(), TS: s.Fetch.TS, Sig: s.Fetch.Sig}
 	must(t, VerifyFetch(fa, s.Fetch.Login, s.Fetch.After, cert, time.Unix(s.Fetch.TS, 0)))
 	// Код сопряжения и подпись ключей совпадают.
+	// Запрос, подписанный Swift-устройством, проходит проверку подписи в Go.
+	if err := s.CertRequest.Req.Verify(time.Unix(s.CertRequest.Req.CreatedAt, 0)); err != nil {
+		t.Fatalf("Go не принял подписанный Swift запрос: %v", err)
+	}
 	if s.CertRequest.Req.PairCode() != s.CertRequest.PairCode {
 		t.Fatalf("PairCode: Go %s, Swift %s", s.CertRequest.Req.PairCode(), s.CertRequest.PairCode)
 	}

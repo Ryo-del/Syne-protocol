@@ -44,11 +44,11 @@ type TrustChangeError struct {
 func (e *TrustChangeError) Error() string {
 	switch e.Kind {
 	case ChangeReset:
-		return fmt.Sprintf("у %s сменилась идентичность (сброс); сверьте номер безопасности", e.Login)
+		return fmt.Sprintf("у %s сменилась идентичность (сброс); сверьте номер безопасности", ShortLogin(e.Login))
 	case ChangeRollback:
-		return fmt.Sprintf("реестр устройств %s откатился назад", e.Login)
+		return fmt.Sprintf("реестр устройств %s откатился назад", ShortLogin(e.Login))
 	}
-	return fmt.Sprintf("реестр устройств %s не совпадает с запомненным", e.Login)
+	return fmt.Sprintf("реестр устройств %s не совпадает с запомненным", ShortLogin(e.Login))
 }
 
 // State — состояние устройства относительно Hub.
@@ -86,6 +86,7 @@ type Client struct {
 	mu       sync.Mutex
 	login    string // login@org
 	cloudURL string
+	orgName  string
 	dev      *DeviceKey
 	own      *Log
 	trust    *TrustStore
@@ -133,6 +134,15 @@ func (e *APIError) Error() string { return e.Msg }
 func isCode(err error, code string) bool {
 	var e *APIError
 	return errors.As(err, &e) && e.Code == code
+}
+
+// OrgName — название организации для показа пользователю (технический суффикс @org<N> скрыт).
+func (c *Client) OrgName() string { c.mu.Lock(); defer c.mu.Unlock(); return c.orgName }
+
+// ShortLogin — логин без технического суффикса организации: "ivan@org7" -> "ivan".
+func ShortLogin(login string) string {
+	l, _, _ := strings.Cut(login, "@")
+	return l
 }
 
 // CloudURL — адрес Syne Cloud для Hub-входящих ("" — облако не настроено).
@@ -249,7 +259,7 @@ func (c *Client) Init(ctx context.Context) (InitResult, error) {
 	if err != nil {
 		return InitResult{}, err
 	}
-	c.login, c.cloudURL = info.Login, info.CloudURL
+	c.login, c.cloudURL, c.orgName = info.Login, info.CloudURL, info.OrgName
 	if err := c.loadBlob(ctx); err != nil {
 		return InitResult{}, err
 	}

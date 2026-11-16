@@ -102,6 +102,7 @@ type Response struct {
 	Events    []SecurityEvent  `json:"events,omitempty"`
 	Login     string           `json:"login,omitempty"`      // info: login@org владельца сессии
 	CloudURL  string           `json:"cloud_url,omitempty"`  // info: адрес Syne Cloud (Hub-входящие), если настроен
+	OrgName   string           `json:"org_name,omitempty"`   // info: название организации (колледжа) для показа пользователю
 	ResetOpen bool             `json:"reset_open,omitempty"` // info: администратор открыл сброс идентичности
 }
 

@@ -113,6 +113,13 @@ type MirrorPush struct {
 	From    uint64  `json:"from"`    // seq первой записи в Entries (1 — с начала)
 }
 
+// Person — человек колледжа с Key Hub: логин (login@org) и отображаемое имя «Фамилия Имя».
+// Сервер колледжа передаёт список облаку, чтобы телефон показывал имена вместо ID.
+type Person struct {
+	Login string `json:"login"`
+	Name  string `json:"name"`
+}
+
 // MirrorHeads — вершины, которые облако уже имеет (ответ на push и на запрос сверки).
 type MirrorHeads struct {
 	Heads map[string]Head `json:"heads"`

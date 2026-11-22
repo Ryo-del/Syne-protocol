@@ -25,7 +25,14 @@ type InboxPost struct {
 	Group     int64    `json:"group,omitempty"`
 	GroupName string   `json:"group_name,omitempty"`
 	Members   []string `json:"members,omitempty"`
+
+	// Blobs — зашифрованные файлы, привязанные к сообщению (файл 13): облако даёт получателям
+	// скачать их. Имя, тип и ключ файла — только в конверте.
+	Blobs []string `json:"blobs,omitempty"`
 }
+
+// MaxBlobsPerMessage — предел вложений в одном сообщении.
+const MaxBlobsPerMessage = 4
 
 // MaxGroupMembers — предел числа получателей одного группового сообщения.
 const MaxGroupMembers = 200
@@ -63,6 +70,14 @@ func VerifyPost(p *InboxPost, cert Certificate) error {
 		}
 	} else if !ValidLogin(p.To) {
 		return fmt.Errorf("%w: получатель", ErrFormat)
+	}
+	if len(p.Blobs) > MaxBlobsPerMessage {
+		return fmt.Errorf("%w: слишком много вложений", ErrFormat)
+	}
+	for _, b := range p.Blobs {
+		if !ValidBlobID(b) {
+			return fmt.Errorf("%w: идентификатор вложения", ErrFormat)
+		}
 	}
 	if cert.Login != p.From || cert.DeviceID != p.Envelope.SenderID {
 		return fmt.Errorf("%w: отправитель не совпадает с сертификатом", ErrSignature)

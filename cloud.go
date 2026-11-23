@@ -25,6 +25,9 @@ const (
 	CloudOpSyncNow = "cloud_sync_now"
 	// CloudOpGroups — чаты облака, которые сервер завёл для групп пользователя.
 	CloudOpGroups = "cloud_groups"
+	// CloudOpUnsynced — пути из папки пользователя, которых ещё нет в облаке
+	// или которые изменились после последней синхронизации.
+	CloudOpUnsynced = "cloud_unsynced"
 )
 
 const CloudTypeResponse = "cloud_response"
@@ -90,4 +93,6 @@ type CloudResponse struct {
 	Accounts []CloudAccount `json:"accounts,omitempty"`
 	// cloud_groups
 	Groups []CloudGroupChat `json:"groups,omitempty"`
+	// cloud_unsynced: пути относительно папки пользователя, разделитель "/".
+	Unsynced []string `json:"unsynced,omitempty"`
 }

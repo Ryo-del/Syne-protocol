@@ -197,3 +197,16 @@ func TestPostToInboxCarriesBlobs(t *testing.T) {
 		t.Fatalf("блоб не попал в запрос доставки: %+v", fc.inboxGot)
 	}
 }
+
+func TestBlobDownloadGoneIsTyped(t *testing.T) {
+	f := newFixture(t, DefaultPolicy())
+	fc := &fakeCloud{t: t, f: f, data: map[string][]byte{}, done: map[string]bool{}, size: map[string]int64{}}
+	srv := httptest.NewServer(fc)
+	defer srv.Close()
+	c := newTestClient(t, srv.URL, f)
+	_, err := c.BlobDownload(context.Background(), strings.Repeat("cd", 32)) // облако отвечает 404
+	var be *BlobError
+	if !errors.As(err, &be) || !errors.Is(err, ErrCloudBlob) || !be.Gone() {
+		t.Fatalf("ожидали BlobError с Gone(), получили %v", err)
+	}
+}

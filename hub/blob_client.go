@@ -26,6 +26,22 @@ const blobUploadChunk = 4 << 20
 // ErrCloudBlob — облако отклонило запрос к блобу (код и сообщение — в тексте).
 var ErrCloudBlob = errors.New("hub: облако отклонило запрос вложения")
 
+// BlobError — ответ облака об ошибке: Status — код HTTP (404/410 — блоб удалён или истёк срок хранения).
+// errors.Is(err, ErrCloudBlob) выполняется.
+type BlobError struct {
+	Status        int
+	Code, Message string
+}
+
+func (e *BlobError) Error() string {
+	return fmt.Sprintf("%s: %d %s %s", ErrCloudBlob, e.Status, e.Code, e.Message)
+}
+
+func (e *BlobError) Is(target error) bool { return target == ErrCloudBlob }
+
+// Gone — вложения больше нет в облаке (истёк срок хранения или оно удалено).
+func (e *BlobError) Gone() bool { return e.Status == http.StatusGone || e.Status == http.StatusNotFound }
+
 // BlobOffsetError — облако ждёт продолжения загрузки с другого места (Received байт уже есть).
 type BlobOffsetError struct{ Received int64 }
 
@@ -45,7 +61,7 @@ func blobErr(resp *http.Response) error {
 	if b.Error == "offset_mismatch" {
 		return &BlobOffsetError{Received: b.Received}
 	}
-	return fmt.Errorf("%w: %d %s %s", ErrCloudBlob, resp.StatusCode, b.Error, b.Message)
+	return &BlobError{Status: resp.StatusCode, Code: b.Error, Message: b.Message}
 }
 
 // blobSigner возвращает ключ устройства и логин под замком клиента.

@@ -36,11 +36,17 @@ func inboxErr(resp *http.Response) error {
 // PostToInbox кладёт конверт во входящие облака для собеседника (и для своих других
 // устройств). Облачный аккаунт не нужен: облако проверяет подпись конверта по реестру.
 func (c *Client) PostToInbox(ctx context.Context, peerServerLogin string, env *Envelope, msgID string) error {
+	return c.PostToInboxBlobs(ctx, peerServerLogin, env, msgID, nil)
+}
+
+// PostToInboxBlobs — то же с вложениями: blobs — идентификаторы уже загруженных блобов (BlobUpload),
+// облако даст получателям скачать их.
+func (c *Client) PostToInboxBlobs(ctx context.Context, peerServerLogin string, env *Envelope, msgID string, blobs []string) error {
 	base, err := c.cloudBase()
 	if err != nil {
 		return err
 	}
-	post := InboxPost{From: c.Login(), To: c.peerLoginSafe(peerServerLogin), Envelope: env, MsgID: msgID}
+	post := InboxPost{From: c.Login(), To: c.peerLoginSafe(peerServerLogin), Envelope: env, MsgID: msgID, Blobs: blobs}
 	raw, err := json.Marshal(post)
 	if err != nil {
 		return err
@@ -64,12 +70,17 @@ func (c *Client) PostToInbox(ctx context.Context, peerServerLogin string, env *E
 // PostGroupToInbox кладёт конверт группы во входящие облака для всех участников (и для своих
 // других устройств): телефоны участников получат его без облачного аккаунта.
 func (c *Client) PostGroupToInbox(ctx context.Context, groupID int64, groupName string, memberServerLogins []string, env *Envelope, msgID string) error {
+	return c.PostGroupToInboxBlobs(ctx, groupID, groupName, memberServerLogins, env, msgID, nil)
+}
+
+// PostGroupToInboxBlobs — то же с вложениями (см. PostToInboxBlobs).
+func (c *Client) PostGroupToInboxBlobs(ctx context.Context, groupID int64, groupName string, memberServerLogins []string, env *Envelope, msgID string, blobs []string) error {
 	base, err := c.cloudBase()
 	if err != nil {
 		return err
 	}
 	post := InboxPost{From: c.Login(), Envelope: env, MsgID: msgID, Group: groupID, GroupName: groupName,
-		Members: c.GroupLogins(memberServerLogins)}
+		Members: c.GroupLogins(memberServerLogins), Blobs: blobs}
 	raw, err := json.Marshal(post)
 	if err != nil {
 		return err

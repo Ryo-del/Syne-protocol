@@ -40,7 +40,9 @@ func (e *BlobError) Error() string {
 func (e *BlobError) Is(target error) bool { return target == ErrCloudBlob }
 
 // Gone — вложения больше нет в облаке (истёк срок хранения или оно удалено).
-func (e *BlobError) Gone() bool { return e.Status == http.StatusGone || e.Status == http.StatusNotFound }
+func (e *BlobError) Gone() bool {
+	return e.Status == http.StatusGone || e.Status == http.StatusNotFound
+}
 
 // BlobOffsetError — облако ждёт продолжения загрузки с другого места (Received байт уже есть).
 type BlobOffsetError struct{ Received int64 }
